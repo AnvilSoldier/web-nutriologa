@@ -30,7 +30,7 @@ npm test   # pruebas del chat, pagos y horarios
 ## Subir a Railway
 
 1. Sube esta carpeta a un repositorio de GitHub (puede ser privado).
-2. En [railway.com](https://railway.com): **New Project → Deploy from GitHub repo** → elige el repositorio. Railway detecta Node, corre `npm install` y `npm start` (ver `railway.json`).
+2. En [railway.com](https://railway.com): **New Project → Deploy from GitHub repo** → elige el repositorio. Railway construye con el `Dockerfile` (Node 22, `npm ci` y `node src/server.js`; ver `railway.json`).
 3. En el servicio: **Settings → Networking → Generate Domain** para tener la URL pública.
 4. **Variables** (opcional pero recomendado):
    - `ADMIN_KEY` = una clave tuya para ver las citas en `/admin?key=...`
