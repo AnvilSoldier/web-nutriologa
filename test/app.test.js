@@ -28,3 +28,22 @@ test('horarios del consultorio', () => {
   assert.deepEqual(schedule.slotsForDate('2026-11-22'), []); // domingo
   assert.equal(schedule.localToDate('2026-11-16', '09:00').toISOString(), '2026-11-16T15:00:00.000Z');
 });
+
+test('correos de cita: contenido y seguridad', () => {
+  const { clinicEmail, patientEmail } = require('../src/mailer');
+  const cita = {
+    folio: 'VM-TEST01', servicio: 'renal', servicioNombre: 'Consulta de Nutrición Renal Especializada', modalidad: 'presencial',
+    fecha: '2026-11-16', hora: '09:00', monto: 800,
+    paciente: { name: 'Ana <script>x</script>', email: 'ana@correo.com', phone: '3312345678', notes: '' },
+    pago: { brand: 'visa', last4: '4242', test: true }
+  };
+  const c = clinicEmail(cita);
+  assert.equal(c.replyTo, 'ana@correo.com');
+  assert.ok(!c.html.includes('<script>'));
+  assert.match(c.html, /\$800 MXN, Visa terminación 4242/);
+  const p = patientEmail(cita, 'nutricionslim.dm@gmail.com');
+  assert.equal(p.to, 'ana@correo.com');
+  assert.equal(p.replyTo, 'nutricionslim.dm@gmail.com');
+  assert.match(p.subject, /VM-TEST01/);
+  assert.match(p.attachments[0].content, /DTSTART:20261116T150000Z/);
+});

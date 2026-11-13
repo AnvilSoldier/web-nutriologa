@@ -6,6 +6,8 @@ const schedule = require('./schedule');
 const store = require('./store');
 const payments = require('./payments');
 const chatbot = require('./chatbot');
+const mailer = require('./mailer');
+const { buildIcs } = require('./ics');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -92,7 +94,7 @@ app.post('/api/bookings', rateLimit(12, 10 * 60 * 1000), async (req, res) => {
   if (!schedule.isValidDateStr(date)) errors.date = 'Elige una fecha.';
   if (!/^\d{2}:\d{2}$/.test(String(time || ''))) errors.time = 'Elige un horario.';
 
-  const name = String(patient.name || '').trim().slice(0, 80);
+  const name = String(patient.name || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 80);
   const email = String(patient.email || '').trim().slice(0, 120);
   const phone = String(patient.phone || '').replace(/[^\d+]/g, '').slice(0, 16);
   const notes = String(patient.notes || '').trim().slice(0, 500);
@@ -125,6 +127,10 @@ app.post('/api/bookings', rateLimit(12, 10 * 60 * 1000), async (req, res) => {
       pago: cita.pago,
       whatsapp: `https://wa.me/${info.whatsapp}?text=${encodeURIComponent(`Hola, acabo de agendar mi cita. Folio ${cita.folio}, ${schedule.humanDate(date)} a las ${schedule.humanTime(time)}.`)}`
     });
+
+    // Pago aprobado y cita guardada: avisos por correo al consultorio y al paciente.
+    // Se envían después de responder, así el paciente no espera al servidor de correo.
+    mailer.sendBookingEmails(cita).then(estado => { cita.correos = estado; store.save(); });
   } finally {
     locks.delete(key);
   }
@@ -134,19 +140,7 @@ app.post('/api/bookings', rateLimit(12, 10 * 60 * 1000), async (req, res) => {
 app.get('/api/bookings/:folio/ics', (req, res) => {
   const c = store.byFolio(String(req.params.folio).toUpperCase());
   if (!c) return res.status(404).send('Cita no encontrada');
-  const start = schedule.localToDate(c.fecha, c.hora);
-  const end = new Date(start.getTime() + info.duracionCitaMin * 60000);
-  const f = d => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-  const where = c.modalidad === 'presencial' ? info.direccion : 'En línea (te envían el enlace por WhatsApp)';
-  const esc = s => String(s).replace(/([,;\\])/g, '\\$1');
-  const ics = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Consultorio Valeria Mendez//Agenda//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
-    'BEGIN:VEVENT', `UID:${c.folio}@consultorionutricion.mx`, `DTSTAMP:${f(new Date())}`, `DTSTART:${f(start)}`, `DTEND:${f(end)}`,
-    `SUMMARY:${esc(c.servicioNombre)} — ${esc(info.nombre)}`, `LOCATION:${esc(where)}`,
-    `DESCRIPTION:Folio ${c.folio}. Dudas o cambios por WhatsApp ${info.telefono}.`,
-    'BEGIN:VALARM', 'TRIGGER:-PT2H', 'ACTION:DISPLAY', 'DESCRIPTION:Tu consulta de nutrición es en 2 horas', 'END:VALARM',
-    'END:VEVENT', 'END:VCALENDAR'
-  ].join('\r\n');
+  const ics = buildIcs(c);
   res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="cita-${c.folio}.ics"`);
   res.send(ics);
@@ -160,8 +154,14 @@ app.post('/api/chat', rateLimit(40, 60 * 1000), (req, res) => {
 // Panel mínimo para la nutrióloga: /admin?key=TU_CLAVE  (define ADMIN_KEY en Railway)
 app.get('/admin', (req, res) => {
   if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.status(401).send('Define ADMIN_KEY y entra con /admin?key=TU_CLAVE');
-  const rows = store.all().map(c => `<tr><td>${c.folio}</td><td>${c.fecha}</td><td>${c.hora}</td><td>${c.servicio}</td><td>${c.modalidad}</td><td>${escapeHtml(c.paciente.name)}</td><td>${escapeHtml(c.paciente.phone)}</td><td>${escapeHtml(c.paciente.email)}</td><td>$${c.monto}</td><td>${c.pago.brand} •••• ${c.pago.last4}${c.pago.test ? ' (prueba)' : ''}</td></tr>`).join('');
-  res.send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Citas</title><style>body{font:15px system-ui;margin:24px;color:#0F172A}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #D5E0D8;padding:8px;text-align:left;white-space:nowrap}div{overflow-x:auto}</style><h1>Citas agendadas (${store.all().length})</h1><div><table><tr><th>Folio</th><th>Fecha</th><th>Hora</th><th>Servicio</th><th>Modalidad</th><th>Paciente</th><th>Teléfono</th><th>Correo</th><th>Monto</th><th>Pago</th></tr>${rows}</table></div>`);
+  const rows = store.all().map(c => `<tr><td>${c.folio}</td><td>${c.fecha}</td><td>${c.hora}</td><td>${c.servicio}</td><td>${c.modalidad}</td><td>${escapeHtml(c.paciente.name)}</td><td>${escapeHtml(c.paciente.phone)}</td><td>${escapeHtml(c.paciente.email)}</td><td>$${c.monto}</td><td>${c.pago.brand} •••• ${c.pago.last4}${c.pago.test ? ' (prueba)' : ''}</td><td>${c.correos ? `Consultorio: ${c.correos.consultorio}<br>Paciente: ${c.correos.paciente}` : 'Enviando…'}</td></tr>`).join('');
+  res.send(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Citas</title><style>body{font:15px system-ui;margin:24px;color:#0F172A}table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #D5E0D8;padding:8px;text-align:left;white-space:nowrap}div{overflow-x:auto}</style><h1>Citas agendadas (${store.all().length})</h1><div><table><tr><th>Folio</th><th>Fecha</th><th>Hora</th><th>Servicio</th><th>Modalidad</th><th>Paciente</th><th>Teléfono</th><th>Correo</th><th>Monto</th><th>Pago</th><th>Correos</th></tr>${rows}</table></div><p>Correo: ${mailer.mode() ? 'configurado (' + mailer.mode() + ')' : 'sin configurar'}. <a href="/admin/test-email?key=${encodeURIComponent(req.query.key)}">Enviar correo de prueba</a></p>`);
+});
+
+// Prueba de correo: /admin/test-email?key=TU_CLAVE
+app.get('/admin/test-email', rateLimit(5, 10 * 60 * 1000), async (req, res) => {
+  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.status(401).send('Define ADMIN_KEY y entra con /admin/test-email?key=TU_CLAVE');
+  res.json(await mailer.sendTest());
 });
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -185,4 +185,4 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
 app.use((req, res) => { res.status(404); sendIndex(req, res); });
 
-app.listen(PORT, () => console.log(`Consultorio listo en http://localhost:${PORT}  (datos en ${store.DATA_DIR})`));
+app.listen(PORT, () => console.log(`Consultorio listo en http://localhost:${PORT}  (datos en ${store.DATA_DIR}, correo: ${mailer.mode() || 'sin configurar'})`));

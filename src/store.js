@@ -47,6 +47,9 @@ function add(cita) {
   return cita;
 }
 
+// Guarda cambios hechos a una cita ya existente (p. ej. estado de los correos)
+function save() { return persist(); }
+
 function byFolio(folio) {
   return load().citas.find(c => c.folio === folio) || null;
 }
@@ -55,4 +58,4 @@ function all() {
   return [...load().citas].sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora));
 }
 
-module.exports = { takenSet, isTaken, add, byFolio, all, DATA_DIR };
+module.exports = { takenSet, isTaken, add, save, byFolio, all, DATA_DIR };
