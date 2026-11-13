@@ -35,6 +35,7 @@ npm test   # pruebas del chat, pagos y horarios
 4. **Variables** (opcional pero recomendado):
    - `ADMIN_KEY` = una clave tuya para ver las citas en `/admin?key=...`
    - `DATA_DIR` = `/data`
+   - `SITE_URL` = tu dominio final, p. ej. `https://www.tudominio.mx` (SEO: canonical, sitemap y datos estructurados usan ese dominio y el dominio de Railway redirige a él con 301)
 5. **Volume** (para que las citas no se borren en cada deploy): en el servicio, **+ New → Volume**, móntalo en `/data`.
 
 Sin GitHub también se puede con la CLI: `npm i -g @railway/cli`, `railway login`, `railway init`, `railway up` desde esta carpeta.
@@ -87,4 +88,5 @@ src/ics.js         archivo de calendario de la cita
 src/chatbot.js     algoritmo del chat
 public/            página, estilos, scripts, imágenes
 DESIGN.md          sistema de diseño
+SEO.md             posicionamiento para "nutrióloga en Guadalajara": qué tiene la web y qué falta fuera de ella
 ```

@@ -1,5 +1,7 @@
 const express = require('express');
+const compression = require('compression');
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const { info, servicios, modalidades } = require('./info');
 const schedule = require('./schedule');
@@ -12,16 +14,32 @@ const { buildIcs } = require('./ics');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY || '';
+// Dominio oficial (p. ej. https://www.tudominio.mx). Con él, Google ve una sola versión del sitio:
+// canonical, sitemap y datos estructurados usan este dominio y los demás (como el de Railway) redirigen aquí.
+const SITE_URL = (process.env.SITE_URL || '').trim().replace(/\/+$/, '');
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+app.use(compression());
 app.use(express.json({ limit: '20kb' }));
+
+// Un solo dominio para buscadores: si SITE_URL está definido, todo lo demás redirige (301) a él
+if (SITE_URL) {
+  const canonicalHost = new URL(SITE_URL).host;
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (req.path === '/health' || req.path.startsWith('/api/') || req.path.startsWith('/admin')) return next();
+    if (req.get('host') === canonicalHost) return next();
+    res.redirect(301, SITE_URL + req.originalUrl);
+  });
+}
 
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (req.path.startsWith('/api/') || req.path.startsWith('/admin') || req.path === '/health') res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   next();
 });
 
@@ -166,23 +184,107 @@ app.get('/admin/test-email', rateLimit(5, 10 * 60 * 1000), async (req, res) => {
 
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
-// Página principal: la imagen para redes sociales necesita URL absoluta
-const fs = require('fs');
-const INDEX = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
-function sendIndex(req, res) {
-  const base = `${req.protocol}://${req.get('host')}`;
-  res.type('html').send(INDEX.replace('content="/img/og.jpg"', `content="${base}/img/og.jpg"`).replace('</title>', `</title>\n  <link rel="canonical" href="${base}/">\n  <meta property="og:url" content="${base}/">`));
+// ---------- Página principal y SEO ----------
+const PUBLIC = path.join(__dirname, '..', 'public');
+const INDEX_PATH = path.join(PUBLIC, 'index.html');
+const LASTMOD = fs.statSync(INDEX_PATH).mtime.toISOString().slice(0, 10);
+
+function baseUrl(req) { return SITE_URL || `${req.protocol}://${req.get('host')}`; }
+
+// FAQPage a partir de la sección "Preguntas frecuentes": lo que lee Google siempre coincide con lo visible
+function faqJsonLd(html) {
+  const strip = t => t.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  const items = [...html.matchAll(/<details>\s*<summary>([\s\S]*?)<\/summary>\s*<div class="faq__a">([\s\S]*?)<\/div>\s*<\/details>/g)]
+    .map(m => ({ '@type': 'Question', name: strip(m[1]), acceptedAnswer: { '@type': 'Answer', text: strip(m[2]) } }));
+  if (!items.length) return '';
+  const data = { '@context': 'https://schema.org', '@type': 'FAQPage', '@id': '__SITE__/#preguntas', mainEntity: items };
+  return `  <script type="application/ld+json">${JSON.stringify(data).replace(/</g, '\\u003c')}</script>\n`;
 }
+
+// Versión por contenido para CSS/JS: caché larga sin servir archivos viejos después de un deploy
+function assetVersion(rel) {
+  try { return crypto.createHash('md5').update(fs.readFileSync(path.join(PUBLIC, rel))).digest('hex').slice(0, 8); } catch { return ''; }
+}
+function versionAssets(html) {
+  return html.replace(/(href|src)="(\/(?:css|js)\/[\w.-]+\.(?:css|js))"/g, (m, attr, url) => {
+    const v = assetVersion(url.slice(1));
+    return v ? `${attr}="${url}?v=${v}"` : m;
+  });
+}
+
+const INDEX_RAW = fs.readFileSync(INDEX_PATH, 'utf8');
+const INDEX = versionAssets(INDEX_RAW.replace('</head>', faqJsonLd(INDEX_RAW) + '</head>')).replace(/__LASTMOD__/g, LASTMOD);
+
+function renderIndex(req) { return INDEX.replace(/__SITE__/g, baseUrl(req)); }
+function sendIndex(req, res) { res.type('html').send(renderIndex(req)); }
 app.get(['/', '/index.html'], sendIndex);
 
-app.use(express.static(path.join(__dirname, '..', 'public'), {
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${baseUrl(req)}/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const b = baseUrl(req);
+  res.type('application/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>${b}/</loc>
+    <lastmod>${LASTMOD}</lastmod>
+    <image:image><image:loc>${b}/img/valeria-retrato.webp</image:loc></image:image>
+    <image:image><image:loc>${b}/img/consultorio.webp</image:loc></image:image>
+    <image:image><image:loc>${b}/img/og.jpg</image:loc></image:image>
+  </url>
+</urlset>
+`);
+});
+
+// Resumen para buscadores con IA (ChatGPT, Perplexity, Gemini): datos oficiales en texto plano
+app.get('/llms.txt', (req, res) => {
+  const b = baseUrl(req);
+  res.type('text/plain; charset=utf-8').send(`# ${info.nombre} — Nutrióloga en Guadalajara
+
+> ${info.titulo}. Consulta presencial en ${info.direccionCorta} y en línea para todo México.
+
+## Datos del consultorio
+- Dirección: ${info.direccion}
+- Teléfono y WhatsApp: ${info.telefono}
+- Correo: ${info.email}
+- Horario: ${info.horarioTexto}
+- Atención presencial: ${info.coberturaPresencial}
+- Atención en línea: ${info.coberturaOnline}
+- Cédula profesional: ${info.cedulaLic}. Cédula de especialidad: ${info.cedulaEsp}
+- Formación: ${info.licenciatura}; ${info.especialidad}
+
+## Consultas
+${Object.values(servicios).map(sv => `- ${sv.nombre}: $${sv.precio} MXN. ${sv.enfoque}`).join('\n')}
+
+## Enlaces
+- Agenda y pago en línea: ${b}/#agenda
+- Preguntas frecuentes: ${b}/#preguntas
+- Instagram: https://instagram.com/${info.instagram}
+`);
+});
+
+app.use(express.static(PUBLIC, {
   extensions: ['html'],
+  index: false,
   setHeaders(res, p) {
-    if (/\.(webp|png|jpg|svg|woff2)$/.test(p)) res.setHeader('Cache-Control', 'public, max-age=604800');
+    if (/\.(webp|png|jpg|svg|woff2)$/.test(p)) res.setHeader('Cache-Control', 'public, max-age=2592000');
+    else if (/\.(css|js)$/.test(p)) res.setHeader('Cache-Control', res.req.query.v ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
   }
 }));
 
 app.use('/api', (req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
-app.use((req, res) => { res.status(404); sendIndex(req, res); });
+// 404: muestra la página pero sin indexar ni marcarla como canónica
+app.use((req, res) => {
+  res.status(404).setHeader('X-Robots-Tag', 'noindex');
+  res.type('html').send(renderIndex(req)
+    .replace(/\s*<link rel="canonical"[^>]*>/, '')
+    .replace(/<meta name="robots" content="[^"]*">/, '<meta name="robots" content="noindex, follow">'));
+});
 
-app.listen(PORT, () => console.log(`Consultorio listo en http://localhost:${PORT}  (datos en ${store.DATA_DIR}, correo: ${mailer.mode() || 'sin configurar'})`));
+if (require.main === module) {
+  app.listen(PORT, () => console.log(`Consultorio listo en http://localhost:${PORT}  (datos en ${store.DATA_DIR}, correo: ${mailer.mode() || 'sin configurar'})`));
+}
+
+module.exports = app;

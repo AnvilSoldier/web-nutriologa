@@ -8,8 +8,12 @@
   const title = $('[data-split]');
   if (title && !reduce) {
     const words = title.textContent.trim().split(/\s+/);
-    title.setAttribute('aria-label', title.textContent.trim());
+    // el texto completo queda para lectores de pantalla (el título vive dentro del h1)
+    const full = document.createElement('span');
+    full.className = 'sr-only';
+    full.textContent = title.textContent.trim();
     title.innerHTML = words.map((w, i) => `<span class="w" aria-hidden="true"><span style="--i:${i}">${w}</span></span>`).join(' ');
+    title.prepend(full);
   }
   const ready = () => requestAnimationFrame(() => document.body.classList.add('is-ready'));
   const heroImg = $('.leaf__img');

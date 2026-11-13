@@ -135,6 +135,8 @@ button { font: inherit; color: inherit; }
 .hero__kicker { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; color: var(--petrol); background: var(--surface); border: 1px solid var(--line); padding: 6px 14px 6px 10px; border-radius: var(--r-pill); }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary-hi); box-shadow: 0 0 0 0 rgba(16,185,129,.5); animation: pulse 2.4s var(--ease) infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 10px rgba(16,185,129,0); } 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); } }
+.hero__h1 { display: block; }
+.hero__h1 .hero__title { display: block; }
 .hero__title { margin: 22px 0 22px; font: 400 clamp(40px, 4.9vw, 66px)/1.02 var(--f-display); letter-spacing: -.02em; max-width: 15ch; }
 .hero__title .w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: .08em; margin-bottom: -.08em; }
 .hero__title .w > span { display: inline-block; transform: translateY(105%); transition: transform var(--t-hero) var(--ease); transition-delay: calc(var(--i) * 45ms + 120ms); }
@@ -503,6 +505,7 @@ button { font: inherit; color: inherit; }
 .status__dot { width: 10px; height: 10px; border-radius: 50%; background: #94A3B8; }
 .status.is-open { background: #DCF3E6; color: #0F5B2C; }
 .status.is-open .status__dot { background: var(--primary-hi); animation: pulse 2.4s var(--ease) infinite; }
+.loc__lead { margin: 14px 0 0; font-size: 17px; color: var(--ink-2); max-width: 48ch; }
 address { font-style: normal; font-size: 19px; line-height: 1.55; }
 .hours { width: 100%; border-collapse: collapse; margin: 24px 0 28px; font-variant-numeric: tabular-nums; }
 .hours th, .hours td { text-align: left; padding: 12px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
