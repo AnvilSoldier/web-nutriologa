@@ -47,3 +47,19 @@ test('correos de cita: contenido y seguridad', () => {
   assert.match(p.subject, /VM-TEST01/);
   assert.match(p.attachments[0].content, /DTSTART:20261116T150000Z/);
 });
+
+test('correo: elige el canal según las variables', async () => {
+  const { routes, buildRaw } = require('../src/mailer');
+  const keep = { ...process.env };
+  for (const k of Object.keys(process.env)) if (/^(MAIL_|SMTP_|RESEND_|RAILWAY_)/.test(k)) delete process.env[k];
+  assert.deepEqual(routes(), []);
+  Object.assign(process.env, { MAIL_SERVER: 'mail.x.mx', MAIL_USERNAME: 'bot@x.mx', MAIL_PASSWORD: 'p' });
+  assert.deepEqual(routes(), ['smtp']);
+  Object.assign(process.env, { MAIL_PROXY_URL: 'https://x.icu/proxy_smtp.php', MAIL_PROXY_SECRET: 's' });
+  assert.deepEqual(routes(), ['smtp', 'puente']);
+  process.env.RAILWAY_ENVIRONMENT = 'production';
+  assert.deepEqual(routes(), ['puente']);
+  const raw = await buildRaw({ from: 'a@x.mx', to: 'b@y.mx', subject: 'x', text: '.linea\nok' });
+  assert.ok(!/(^|\r\n)\.[^.]/.test(raw), 'los puntos al inicio de línea van duplicados');
+  process.env = keep;
+});

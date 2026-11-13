@@ -41,23 +41,30 @@ Sin GitHub también se puede con la CLI: `npm i -g @railway/cli`, `railway login
 
 ## Correos
 
-Pon estas variables en Railway (**Variables**) o en tu `.env`. Ejemplo en `.env.example`.
+Al aprobarse un pago salen dos correos: aviso al consultorio (`NOTIFY_TO`, por defecto `nutricionslim.dm@gmail.com`) y confirmación al paciente con el archivo de calendario.
+
+Railway bloquea el SMTP en Free/Trial/Hobby, así que en Railway los correos salen por el **puente del servidor ICU** (`proxy_smtp.php`, el mismo de Vida Nutritiva): la web manda el correo por HTTPS al puente y el puente lo entrega por SMTP. Fuera de Railway se intenta SMTP directo y, si falla, el puente.
+
+Variables (mismos nombres que Vida Nutritiva; ejemplo en `.env.example`):
 
 | Variable | Qué es |
 |---|---|
-| `SMTP_HOST` | Servidor SMTP, p. ej. `smtp.gmail.com` |
-| `SMTP_PORT` | `465` (SSL, por defecto) o `587` |
-| `SMTP_SECURE` | `true`/`false`. Por defecto `true` si el puerto es 465 |
-| `SMTP_USER` | Usuario de la cuenta |
-| `SMTP_PASS` | Contraseña. En Gmail usa una **contraseña de aplicación** (requiere verificación en 2 pasos) |
-| `MAIL_FROM` | Remitente. Por defecto `SMTP_USER` |
-| `NOTIFY_TO` | A quién avisar. Por defecto `nutricionslim.dm@gmail.com`. Varios con coma |
-| `RESEND_API_KEY` | Opcional. Si existe, se envía por la API de Resend en vez de SMTP |
+| `MAIL_PROXY_URL` | URL del puente, p. ej. `https://…icu/proxy_smtp.php` |
+| `MAIL_PROXY_SECRET` | Secreto del puente |
+| `MAIL_SERVER` | Servidor SMTP de la cuenta (`SMTP_HOST` también sirve) |
+| `MAIL_PORT` | `465` (por defecto) o `587` |
+| `MAIL_USE_SSL` | `True`/`False` |
+| `MAIL_USERNAME` | Cuenta que envía (`SMTP_USER`) |
+| `MAIL_PASSWORD` | Contraseña de esa cuenta (`SMTP_PASS`) |
+| `MAIL_FROM` | Remitente visible. Por defecto `"Consultorio L.N.C. Valeria Méndez Ortega" <MAIL_USERNAME>` |
+| `NOTIFY_TO` | A quién avisar. Varios con coma |
+| `MAIL_FORCE_BRIDGE` | `true` para usar siempre el puente |
+| `RESEND_API_KEY` | Opcional: enviar por la API de Resend |
 
-- Los correos salen solo cuando el pago fue aprobado. Un pago rechazado no manda nada.
-- Se envían después de responder al paciente; si el correo falla, la cita igual queda guardada.
-- Prueba la configuración en `/admin/test-email?key=TU_CLAVE`. En `/admin` se ve si cada aviso salió (`enviado`, `error` o `sin_configurar`).
-- **Ojo con Railway**: en los planes Free, Trial y Hobby, Railway bloquea los puertos SMTP. Ahí usa el plan Pro o pon `RESEND_API_KEY` (con `MAIL_FROM` de un dominio verificado en Resend).
+- El correo se manda completo (remitente, Reply-To y adjunto .ics) dentro de `raw_email`, así el puente no le pone el nombre de Vida Nutritiva.
+- Ninguna clave va en el código: todo sale de variables de entorno.
+- Los correos salen solo con pago aprobado; si fallan, la cita igual queda guardada.
+- Prueba en `/admin/test-email?key=TU_CLAVE`. En `/admin` se ve el estado de cada aviso.
 
 ## Cambiar datos
 
@@ -75,7 +82,7 @@ src/info.js        datos oficiales del consultorio
 src/schedule.js    horarios y disponibilidad (hora de Guadalajara)
 src/store.js       guardado de citas (JSON)
 src/payments.js    pasarela simulada
-src/mailer.js      correos de cita confirmada (SMTP o Resend)
+src/mailer.js      correos de cita confirmada (puente ICU, SMTP o Resend)
 src/ics.js         archivo de calendario de la cita
 src/chatbot.js     algoritmo del chat
 public/            página, estilos, scripts, imágenes
